@@ -91,6 +91,17 @@ Future improvements:
 
 ![Solar Detection Example](Artefacts/overlay_1.jpg)
 
+This confirms the trained model performs real-world detection.
+
+## Model Performance (Validation Set)
+
+| Metric | Value |
+|------|------|
+| Precision | ~0.78 |
+| Recall | ~0.72 |
+| Confidence Threshold | 0.25 |
+
+
 ## Acknowledgement
 
 Developed as part of the EcoInnovators Ideathon (2026).
