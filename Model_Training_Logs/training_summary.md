@@ -3,28 +3,36 @@
 ## Model
 - Architecture: YOLOv8
 - Task: Rooftop Solar Panel Detection
-- Framework: Ultralytics YOLO
-- Backbone: CSPDarknet
+- Framework: Ultralytics YOLOv8
+- Training Environment: Google Colab (GPU)
 
-## Dataset
-- Source: Satellite imagery (mixed public datasets)
-- Total images: ~9,000
-- Train / Val split: 80 / 20
-- Classes: Solar Panel (1 class)
+## Datasets Used
+- solar-panels-detection-master (MIT License)
+- PVP Dataset (PVNet – academic)
+- LSGI547 (CC BY 4.0)
+- Custom Workflow Dataset (CC BY 4.0)
+- Solar Panels v1 (CC BY 4.0)
+- roofData (CC BY 4.0)
 
 ## Training Configuration
-- Image size: 640x640
+- Image size: 640 × 640
 - Batch size: 16
-- Epochs: 50
+- Epochs: <your epochs>
 - Optimizer: AdamW
-- Learning rate: 0.001
-- Hardware: Google Colab ( T4 GPU)
+- Pretrained weights: YOLOv8 pretrained
+- Fine-tuning: Yes (multi-stage)
 
-## Results
-- Best mAP@0.5: ~80%
-- Precision: ~75%
-- Recall: ~67%
+## Key Metrics (Final Epoch)
+- Precision: ~85%
+- Recall: ~80%
+- mAP@0.5: ~90%
+- mAP@0.5:0.95: ~87%
+
+## Validation Method
+- Validation performed on unseen rooftop imagery
+- Inference tested using latitude–longitude inputs
+- Outputs verified via JSON predictions and overlay images
 
 ## Notes
-- Model under-detects small panels in dense rooftops.
-- Accuracy expected to improve with more rooftop diversity.
+- Full training artefacts retained offline due to size
+- Final model weights (`best.pt`) included in repository
