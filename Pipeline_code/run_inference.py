@@ -1,112 +1,172 @@
 import argparse
-import os
 import sys
-import pandas as pd
+import json
+import requests
 from pathlib import Path
 
-# -------------------------
-# CONFIG
-# -------------------------
-DEFAULT_EXCEL = "Prediction_files/sample_input_lat_long.xlsx"
-DEFAULT_MODEL = "Trained_model/best.pt"
-DEFAULT_OUTPUT = "outputs"
+import pandas as pd
+import cv2
+from ultralytics import YOLO
 
-# -------------------------
-# ARGUMENTS
-# -------------------------
-parser = argparse.ArgumentParser(
-    description="Rooftop Solar Panel Detection – Inference Pipeline"
-)
 
-parser.add_argument(
-    "--excel",
-    type=str,
-    default=DEFAULT_EXCEL,
-    help="Path to Excel file with latitude & longitude (default: sample file)"
-)
+# -----------------------------
+# Helper functions
+# -----------------------------
 
-parser.add_argument(
-    "--model",
-    type=str,
-    default=DEFAULT_MODEL,
-    help="Path to trained YOLO model (default: Trained_model/best.pt)"
-)
+def ask_for_excel(default_path: Path) -> Path:
+    print("\n=== Rooftop Solar Inference ===")
+    print("Press ENTER to use the sample Excel file")
+    print(f"Sample: {default_path}\n")
 
-parser.add_argument(
-    "--output",
-    type=str,
-    default=DEFAULT_OUTPUT,
-    help="Output directory for results (default: outputs/)"
-)
+    user_input = input("Enter path to Excel file (.xlsx): ").strip()
 
-args = parser.parse_args()
+    if user_input == "":
+        if not default_path.exists():
+            print("❌ Sample Excel not found.")
+            sys.exit(1)
+        return default_path
 
-# -------------------------
-# VALIDATION
-# -------------------------
-excel_path = Path(args.excel)
-model_path = Path(args.model)
-output_dir = Path(args.output)
+    excel_path = Path(user_input)
+    if not excel_path.exists():
+        print("❌ Provided Excel file does not exist.")
+        sys.exit(1)
 
-if not excel_path.exists():
-    print(f"❌ Excel file not found: {excel_path}")
-    sys.exit(1)
+    return excel_path
 
-if not model_path.exists():
-    print(f"❌ Model file not found: {model_path}")
-    sys.exit(1)
 
-# Create output folders
-(output_dir / "images").mkdir(parents=True, exist_ok=True)
-(output_dir / "overlays").mkdir(parents=True, exist_ok=True)
-(output_dir / "json").mkdir(parents=True, exist_ok=True)
+def ask_for_api_key() -> str:
+    print("\nGoogle Static Maps API key is required.")
+    print("Your key is NOT stored anywhere.\n")
 
-print("\n✅ Inference Configuration")
-print(f"• Excel file : {excel_path.resolve()}")
-print(f"• Model file : {model_path.resolve()}")
-print(f"• Output dir : {output_dir.resolve()}")
-print("-" * 50)
+    api_key = input("Enter Google Maps API Key: ").strip()
+    if api_key == "":
+        print("❌ API key cannot be empty.")
+        sys.exit(1)
 
-# -------------------------
-# READ EXCEL (ROBUST)
-# -------------------------
-df = pd.read_excel(excel_path)
+    return api_key
 
-# Normalize column names
-df.columns = [c.lower().strip() for c in df.columns]
 
-lat_col = next((c for c in df.columns if c in ["lat", "latitude"]), None)
-lon_col = next((c for c in df.columns if c in ["lon", "lng", "longitude", "long"]), None)
+def load_excel(excel_path: Path):
+    df = pd.read_excel(excel_path)
+    df.columns = [c.lower().strip() for c in df.columns]
 
-if not lat_col or not lon_col:
-    print("❌ Excel must contain latitude & longitude columns.")
-    sys.exit(1)
+    if "lat" not in df.columns or "lon" not in df.columns:
+        print("❌ Excel must contain columns: lat, lon")
+        sys.exit(1)
 
-locations = df[[lat_col, lon_col]].dropna().values.tolist()
+    return df
 
-if len(locations) == 0:
-    print("❌ No valid lat/lon rows found.")
-    sys.exit(1)
 
-print(f"📍 Locations loaded: {len(locations)}")
+def fetch_satellite_image(lat, lon, api_key, save_path):
+    url = (
+        "https://maps.googleapis.com/maps/api/staticmap"
+        f"?center={lat},{lon}"
+        "&zoom=20"
+        "&size=640x640"
+        "&maptype=satellite"
+        f"&key={api_key}"
+    )
 
-# -------------------------
-# INFERENCE (YOUR LOGIC)
-# -------------------------
-print("\n🚀 Running inference...\n")
+    r = requests.get(url, timeout=20)
+    if r.status_code != 200:
+        print(f"⚠️ Failed to fetch image for {lat},{lon}")
+        return False
 
-# 🔽 PLACE YOUR EXISTING LOGIC HERE 🔽
-# for each lat, lon:
-#   1. download satellite image
-#   2. run YOLO inference
-#   3. save overlay image
-#   4. append JSON results
+    with open(save_path, "wb") as f:
+        f.write(r.content)
 
-# -------------------------
-# FINAL SUMMARY
-# -------------------------
-print("\n✅ Inference completed successfully!")
-print("\n📂 Results saved at:")
-print(f"• Overlay images : { (output_dir / 'overlays').resolve() }")
-print(f"• JSON results   : { (output_dir / 'json').resolve() }")
-print("\n🎯 Judges can inspect these folders for outputs.")
+    return True
+
+
+# -----------------------------
+# Main
+# -----------------------------
+
+def main():
+    parser = argparse.ArgumentParser(description="Rooftop Solar Detection Inference")
+    parser.add_argument(
+        "--excel",
+        help="Path to Excel file containing lat/lon",
+        required=False
+    )
+    args = parser.parse_args()
+
+    root = Path(__file__).resolve().parents[1]
+
+    model_path = root / "Trained_model" / "best.pt"
+    sample_excel = root / "Prediction_files" / "sample_input_lat_long.xlsx"
+    output_dir = root / "outputs"
+    images_dir = output_dir / "images"
+    overlays_dir = output_dir / "overlays"
+    json_dir = output_dir / "json"
+
+    # Safe directory creation
+    for d in [output_dir, images_dir, overlays_dir, json_dir]:
+        if not d.exists():
+            d.mkdir(parents=True)
+
+    if not model_path.exists():
+        print("❌ Model file not found:", model_path)
+        sys.exit(1)
+
+    excel_path = Path(args.excel) if args.excel else ask_for_excel(sample_excel)
+    api_key = ask_for_api_key()
+
+    print("\nLoading model...")
+    model = YOLO(str(model_path))
+
+    print("Reading Excel...")
+    df = load_excel(excel_path)
+
+    all_results = []
+
+    print("\nRunning inference...\n")
+
+    for idx, row in df.iterrows():
+        lat, lon = row["lat"], row["lon"]
+
+        img_path = images_dir / f"loc_{idx}.png"
+        overlay_path = overlays_dir / f"overlay_{idx}.png"
+
+        ok = fetch_satellite_image(lat, lon, api_key, img_path)
+        if not ok:
+            continue
+
+        results = model(str(img_path))[0]
+
+        detections = []
+        img = cv2.imread(str(img_path))
+
+        if results.boxes is not None:
+            for box in results.boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                conf = float(box.conf[0])
+
+                detections.append({
+                    "bbox": [x1, y1, x2, y2],
+                    "confidence": round(conf, 3)
+                })
+
+                cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+        cv2.imwrite(str(overlay_path), img)
+
+        all_results.append({
+            "index": idx,
+            "latitude": lat,
+            "longitude": lon,
+            "detections": detections
+        })
+
+    json_path = json_dir / "inference_results.json"
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(all_results, f, indent=2)
+
+    print("\n✅ Inference completed successfully!")
+    print(f"\n📂 Overlay images saved at:\n   {overlays_dir}")
+    print(f"\n📄 JSON results saved at:\n   {json_path}")
+    print("\nJudges can now inspect visual and structured outputs.")
+
+
+if __name__ == "__main__":
+    main()
