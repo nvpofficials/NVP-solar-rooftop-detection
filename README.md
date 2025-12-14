@@ -1,5 +1,13 @@
 # NVP-solar-rooftop-detection
 
+## 🚀 Quick Evaluation (Recommended)
+
+To validate the model in under 2 minutes:
+
+```bash
+pip install -r Pipeline_code/requirements.txt
+python Pipeline_code/run_inference.py
+
 ## Problem Statement
 
 Accurate estimation of rooftop solar adoption is critical for
