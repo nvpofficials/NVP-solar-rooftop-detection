@@ -101,6 +101,11 @@ This confirms the trained model performs real-world detection.
 | Recall | ~0.72 |
 | Confidence Threshold | 0.25 |
 
+### Training & Validation
+Model training and validation were performed in Google Colab using GPU acceleration. 
+Reference training and inference scripts are provided for transparency and reproducibility.
+
+
 
 ## Acknowledgement
 
