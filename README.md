@@ -87,6 +87,10 @@ Future improvements:
 - Temporal analysis for adoption trends
 - Deployment as a web-based dashboard
 
+### Sample Detection Results
+
+![Solar Detection Example](Artefacts/overlay_1.jpg)
+
 ## Acknowledgement
 
 Developed as part of the EcoInnovators Ideathon (2026).
