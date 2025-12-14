@@ -1,171 +1,172 @@
+"""
+Rooftop Solar Detection – Inference Pipeline
+EcoInnovators Ideathon 2026
+
+Author: NVP
+"""
+
 import os
 import sys
 import json
 import time
+import getpass
 from pathlib import Path
+from datetime import datetime
 
 import pandas as pd
 import requests
+import cv2
+import numpy as np
 from ultralytics import YOLO
 
 
-# ---------------------------
-# SAFE DIRECTORY HANDLING
-# ---------------------------
-def ensure_dir(path: Path):
-    if path.exists():
-        if path.is_file():
-            raise RuntimeError(f"Path exists as a FILE, expected directory: {path}")
-    else:
-        path.mkdir(parents=True, exist_ok=True)
+# =========================
+# SAFE DIRECTORY CREATION
+# =========================
+BASE_OUTPUT_DIR = Path("outputs")
+IMAGES_DIR = BASE_OUTPUT_DIR / "images"
+OVERLAYS_DIR = BASE_OUTPUT_DIR / "overlays"
+JSON_DIR = BASE_OUTPUT_DIR / "json"
+
+for d in [IMAGES_DIR, OVERLAYS_DIR, JSON_DIR]:
+    d.mkdir(parents=True, exist_ok=True)
 
 
-# ---------------------------
-# USER INPUT HELPERS
-# ---------------------------
-def ask_excel_path():
-    while True:
-        excel_path = input("Enter path to Excel file (.xlsx): ").strip().strip('"')
-        if not excel_path:
-            print("❌ Excel path cannot be empty.")
-            continue
-        p = Path(excel_path)
-        if p.exists() and p.suffix.lower() == ".xlsx":
-            return p
-        print("❌ Invalid Excel file. Please provide a valid .xlsx file.")
+# =========================
+# USER INPUTS (INTERACTIVE)
+# =========================
+print("\n=== Rooftop Solar Inference ===\n")
+
+excel_path = input("Enter path to Excel file (.xlsx): ").strip().strip('"')
+if not Path(excel_path).exists():
+    print("ERROR: Excel file not found.")
+    sys.exit(1)
+
+api_key = getpass.getpass("Enter Google Static Maps API key (hidden): ").strip()
+if not api_key:
+    print("ERROR: API key cannot be empty.")
+    sys.exit(1)
+
+model_path = Path("Trained_model/best.pt")
+if not model_path.exists():
+    print("ERROR: Trained model not found at Trained_model/best.pt")
+    sys.exit(1)
 
 
-def ask_api_key():
-    while True:
-        key = input("Enter Google Static Maps API key: ").strip()
-        if key:
-            return key
-        print("❌ API key cannot be empty.")
+# =========================
+# LOAD MODEL
+# =========================
+print("\nLoading YOLO model...")
+model = YOLO(str(model_path))
 
 
-# ---------------------------
-# LOAD & VALIDATE EXCEL
-# ---------------------------
-def load_coordinates(excel_path: Path):
-    df = pd.read_excel(excel_path)
+# =========================
+# LOAD EXCEL
+# =========================
+df = pd.read_excel(excel_path)
 
-    df.columns = [c.lower().strip() for c in df.columns]
+required_cols = {"latitude", "longitude"}
+if not required_cols.issubset(df.columns):
+    print("ERROR: Excel must contain 'latitude' and 'longitude' columns.")
+    sys.exit(1)
 
-    if "lat" not in df.columns or "lon" not in df.columns:
-        raise RuntimeError("Excel must contain columns named 'lat' and 'lon'")
-
-    coords = list(zip(df["lat"], df["lon"]))
-    if not coords:
-        raise RuntimeError("Excel file contains no coordinates.")
-
-    return coords
+if "sample_id" not in df.columns:
+    df["sample_id"] = range(1, len(df) + 1)
 
 
-# ---------------------------
-# DOWNLOAD SATELLITE IMAGE
-# ---------------------------
-def fetch_satellite_image(lat, lon, api_key, save_path):
+# =========================
+# GOOGLE STATIC MAPS FETCH
+# =========================
+def fetch_satellite_image(lat, lon, save_path):
     url = (
-        "https://maps.googleapis.com/maps/api/staticmap"
-        f"?center={lat},{lon}"
-        "&zoom=20"
-        "&size=640x640"
-        "&maptype=satellite"
-        f"&key={api_key}"
+        "https://maps.googleapis.com/maps/api/staticmap?"
+        f"center={lat},{lon}&zoom=20&size=640x640&maptype=satellite&key={api_key}"
     )
+    r = requests.get(url, timeout=30)
+    if r.status_code == 200:
+        with open(save_path, "wb") as f:
+            f.write(r.content)
+        return True
+    return False
 
-    r = requests.get(url, timeout=20)
-    if r.status_code != 200:
-        raise RuntimeError("Failed to download satellite image")
 
-    with open(save_path, "wb") as f:
-        f.write(r.content)
+# =========================
+# MAIN LOOP
+# =========================
+results = []
 
+print("\nRunning inference...\n")
 
-# ---------------------------
-# MAIN INFERENCE PIPELINE
-# ---------------------------
-def main():
-    print("\n=== Rooftop Solar Detection Inference ===\n")
+for _, row in df.iterrows():
+    sid = row["sample_id"]
+    lat = row["latitude"]
+    lon = row["longitude"]
 
-    excel_path = ask_excel_path()
-    api_key = ask_api_key()
+    image_path = IMAGES_DIR / f"{sid}.jpg"
+    overlay_path = OVERLAYS_DIR / f"{sid}_overlay.jpg"
 
-    model_path = Path("Trained_model/best.pt")
-    if not model_path.exists():
-        raise RuntimeError("Model file not found at Trained_model/best.pt")
-
-    # Output structure
-    output_dir = Path("outputs")
-    overlays_dir = output_dir / "overlays"
-    json_dir = output_dir / "json"
-    images_dir = output_dir / "images"
-
-    ensure_dir(output_dir)
-    ensure_dir(overlays_dir)
-    ensure_dir(json_dir)
-    ensure_dir(images_dir)
-
-    print("✔ Output directories ready")
-
-    coords = load_coordinates(excel_path)
-    print(f"✔ Loaded {len(coords)} locations from Excel")
-
-    print("✔ Loading YOLO model...")
-    model = YOLO(str(model_path))
-
-    results_json = []
-
-    for idx, (lat, lon) in enumerate(coords, start=1):
-        print(f"→ Processing location {idx}/{len(coords)} ({lat}, {lon})")
-
-        image_path = images_dir / f"input_{idx}.png"
-        overlay_path = overlays_dir / f"overlay_{idx}.png"
-
-        fetch_satellite_image(lat, lon, api_key, image_path)
-
-        results = model.predict(
-            source=str(image_path),
-            conf=0.25,
-            save=False
-        )
-
-        detections = []
-        for box in results[0].boxes:
-            detections.append({
-                "x1": float(box.xyxy[0][0]),
-                "y1": float(box.xyxy[0][1]),
-                "x2": float(box.xyxy[0][2]),
-                "y2": float(box.xyxy[0][3]),
-                "confidence": float(box.conf[0])
-            })
-
-        # Save overlay
-        results[0].save(filename=str(overlay_path))
-
-        results_json.append({
-            "latitude": lat,
-            "longitude": lon,
-            "detections": detections
+    ok = fetch_satellite_image(lat, lon, image_path)
+    if not ok:
+        qc = "NOT_VERIFIABLE"
+        results.append({
+            "sample_id": sid,
+            "lat": lat,
+            "lon": lon,
+            "has_solar": False,
+            "confidence": 0.0,
+            "pv_area_sqm_est": 0.0,
+            "buffer_radius_sqft": 1200,
+            "qc_status": qc,
+            "bbox_or_mask": None,
+            "image_metadata": {"source": "Google Static Maps", "capture_date": None}
         })
+        continue
 
-    json_path = json_dir / "inference_results.json"
-    with open(json_path, "w") as f:
-        json.dump(results_json, f, indent=2)
+    preds = model(str(image_path), conf=0.25)[0]
 
-    print("\n✅ Inference completed successfully!")
-    print("\n📁 Outputs saved to:")
-    print(f"  Overlays : {overlays_dir.resolve()}")
-    print(f"  JSON     : {json_path.resolve()}")
-    print(f"  Images   : {images_dir.resolve()}")
+    has_solar = len(preds.boxes) > 0
+    confidence = float(preds.boxes.conf.max()) if has_solar else 0.0
+
+    # Approximate area calculation (pixel proxy)
+    area_px = 0
+    boxes_out = []
+    for b in preds.boxes.xyxy.cpu().numpy():
+        x1, y1, x2, y2 = b
+        area_px += (x2 - x1) * (y2 - y1)
+        boxes_out.append([float(x1), float(y1), float(x2), float(y2)])
+
+    pv_area_sqm = round(area_px * 0.0004, 2)  # conservative proxy
+    qc = "VERIFIABLE" if has_solar else "NOT_VERIFIABLE"
+
+    annotated = preds.plot()
+    cv2.imwrite(str(overlay_path), annotated)
+
+    results.append({
+        "sample_id": sid,
+        "lat": lat,
+        "lon": lon,
+        "has_solar": has_solar,
+        "confidence": round(confidence, 3),
+        "pv_area_sqm_est": pv_area_sqm,
+        "buffer_radius_sqft": 1200,
+        "qc_status": qc,
+        "bbox_or_mask": boxes_out,
+        "image_metadata": {
+            "source": "Google Static Maps",
+            "capture_date": datetime.utcnow().strftime("%Y-%m-%d")
+        }
+    })
 
 
-# ---------------------------
-# ENTRY POINT
-# ---------------------------
-if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        print(f"\n❌ ERROR: {e}")
-        sys.exit(1)
+# =========================
+# SAVE JSON
+# =========================
+json_path = JSON_DIR / "inference_results.json"
+with open(json_path, "w", encoding="utf-8") as f:
+    json.dump(results, f, indent=2)
+
+print("\n=== INFERENCE COMPLETED SUCCESSFULLY ===")
+print(f"Images saved to     : {IMAGES_DIR.resolve()}")
+print(f"Overlay images to   : {OVERLAYS_DIR.resolve()}")
+print(f"JSON results saved  : {json_path.resolve()}")
+print("\nYou may now review outputs for audit and submission.\n")
