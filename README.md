@@ -1,6 +1,6 @@
 # NVP-solar-rooftop-detection
 
-## 🚀 Quick Evaluation (Recommended)
+## 🚀 Quick Evaluation
 
 To validate the model in under 2 minutes:
 
