@@ -8,7 +8,7 @@ The pipeline is designed to be fully reproducible, interactive, robust to any va
 
 STEP 1: Clone the Repository
 
-git clone https://github.com/nvpofficials/NVP-solar-rooftop-detection
+git clone https://github.com/nvpofficials/NVP-solar-rooftop-detection and then 
 cd NVP-solar-rooftop-detection
 
 ---------------------------------------------------------------------
